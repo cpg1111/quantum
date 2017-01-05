@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Supernomad/quantum/version"
@@ -80,7 +79,7 @@ type Config struct {
 	TLSEnabled      bool              `skip:"true"` // Whether or not tls with the datastore is enabled (toggled by setting the tls parameters at run time)
 	IsIPv4Enabled   bool              `skip:"true"` // Whether or not quantum has determined that this node is ipv4 capable
 	IsIPv6Enabled   bool              `skip:"true"` // Whether or not quantum has determined that this node is ipv6 capable
-	ListenAddr      syscall.Sockaddr  `skip:"true"` // The commputed Sockaddr object to bind the underlying udp sockets to
+	ListenAddr      net.IP            `skip:"true"` // The commputed Sockaddr object to bind the underlying udp sockets to
 	NetworkConfig   *NetworkConfig    `skip:"true"` // The network config detemined by existence of the object in etcd
 	PrivateKey      []byte            `skip:"true"` // The generated ECDH private key for this run of quantum
 	PublicKey       []byte            `skip:"true"` // The generated ECDH public key for this run of quantum
@@ -277,11 +276,12 @@ func (cfg *Config) computeArgs() error {
 		cfg.AuthEnabled = true
 	}
 
-	if numCPU := runtime.NumCPU(); cfg.NumWorkers == 0 || cfg.NumWorkers > numCPU {
+	numCPU := runtime.NumCPU()
+	if cfg.NumWorkers == 0 || cfg.NumWorkers > numCPU {
 		cfg.NumWorkers = numCPU
 	}
 
-	runtime.GOMAXPROCS(cfg.NumWorkers)
+	runtime.GOMAXPROCS(numCPU)
 
 	os.MkdirAll(cfg.DataDir, os.ModeDir)
 	os.MkdirAll(path.Dir(cfg.PidFile), os.ModeDir)
@@ -337,30 +337,35 @@ func (cfg *Config) computeArgs() error {
 		case cfg.IsIPv4Enabled && cfg.IsIPv6Enabled:
 			fallthrough
 		case cfg.IsIPv6Enabled:
-			sa := &syscall.SockaddrInet6{Port: cfg.ListenPort}
-			copy(sa.Addr[:], allV6.To16()[:])
-			cfg.ListenAddr = sa
+			cfg.ListenAddr = allV6
 		case cfg.IsIPv4Enabled:
-			sa := &syscall.SockaddrInet4{Port: cfg.ListenPort}
-			copy(sa.Addr[:], allV4.To4()[:])
-			cfg.ListenAddr = sa
+			cfg.ListenAddr = allV4
 		default:
 			return errors.New("an impossible situation occurred, neither ipv4 or ipv6 is available, check your networking configuration you must have public internet access to use automatic configuration")
 		}
 	} else if addr := cfg.ListenIP.To4(); addr != nil {
-		sa := &syscall.SockaddrInet4{Port: cfg.ListenPort}
-		copy(sa.Addr[:], addr[:])
-		cfg.ListenAddr = sa
+		cfg.ListenAddr = addr
 	} else if addr := cfg.ListenIP.To16(); addr != nil {
-		sa := &syscall.SockaddrInet6{Port: cfg.ListenPort}
-		copy(sa.Addr[:], addr[:])
-		cfg.ListenAddr = sa
+		cfg.ListenAddr = addr
 	} else {
 		return errors.New("an impossible situation occurred, neither ipv4 or ipv6 is available, check your networking configuration you must have public internet access to use automatic configuration")
 	}
 
 	pid := os.Getpid()
 	return ioutil.WriteFile(cfg.PidFile, []byte(strconv.Itoa(pid)), os.ModePerm)
+}
+
+// Sync rpc testing
+func (cfg *Config) Sync(i int, c *Config) error {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return errors.New("error marshalling config data: " + err.Error())
+	}
+	err = json.Unmarshal(data, c)
+	if err != nil {
+		return errors.New("error marshalling response data: " + err.Error())
+	}
+	return nil
 }
 
 // NewConfig creates a new Config struct based on user supplied input.
@@ -383,4 +388,13 @@ func NewConfig(log *Logger) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+type ConfigServer struct {
+	Config *Config
+}
+
+// Sync rpc testing
+func (srv *ConfigServer) Sync(i int, c *Config) error {
+	return srv.Config.Sync(i, c)
 }

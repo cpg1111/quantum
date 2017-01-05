@@ -19,8 +19,7 @@ type Agg struct {
 	stop     chan struct{}
 	statsLog *common.StatsLog
 
-	// Aggs is the channel Data structs are sent to for aggregation and export via the rest api
-	Aggs chan *common.Stat
+	aggs chan *common.Stat
 }
 
 func handleStats(stats *common.Stats, aggStat *common.Stat) {
@@ -96,7 +95,7 @@ func (agg *Agg) Start() {
 			select {
 			case <-agg.stop:
 				break loop
-			case aggStat := <-agg.Aggs:
+			case aggStat := <-agg.aggs:
 				agg.pipeline(aggStat)
 			}
 		}
@@ -119,6 +118,18 @@ func New(log *common.Logger, cfg *common.Config) *Agg {
 			TxStats: common.NewStats(cfg.NumWorkers),
 		},
 		stop: make(chan struct{}),
-		Aggs: make(chan *common.Stat, 1024*1024),
+		aggs: make(chan *common.Stat, 1024*1024),
 	}
+}
+
+type AggServer struct {
+	Agg *Agg
+}
+
+// Sink testing rpc
+func (srv *AggServer) Sink(stat *common.Stat, reply *int) error {
+	srv.Agg.aggs <- stat
+	r := 0
+	reply = &r
+	return nil
 }

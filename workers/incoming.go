@@ -5,32 +5,34 @@ package workers
 
 import (
 	"encoding/binary"
+	"net/rpc"
+	"path"
 
-	"github.com/Supernomad/quantum/agg"
 	"github.com/Supernomad/quantum/common"
-	"github.com/Supernomad/quantum/datastore"
 	"github.com/Supernomad/quantum/device"
 	"github.com/Supernomad/quantum/socket"
 )
 
 // Incoming packet struct for handleing packets coming in off of a Socket struct which are destined for a Device struct.
 type Incoming struct {
-	cfg        *common.Config
-	aggregator *agg.Agg
-	dev        device.Device
-	sock       socket.Socket
-	store      datastore.Datastore
-	stop       bool
+	log  *common.Logger
+	cfg  *common.Config
+	cli  *rpc.Client
+	dev  device.Device
+	sock socket.Socket
+	stop bool
 }
 
 func (incoming *Incoming) resolve(payload *common.Payload) (*common.Payload, *common.Mapping, bool) {
 	dip := binary.LittleEndian.Uint32(payload.IPAddress)
 
-	if mapping, ok := incoming.store.Mapping(dip); ok {
-		return payload, mapping, true
+	var mapping *common.Mapping
+	err := incoming.cli.Call("DatastoreServer.Mapping", dip, mapping)
+	if err != nil {
+		return nil, nil, false
 	}
+	return payload, mapping, true
 
-	return nil, nil, false
 }
 
 func (incoming *Incoming) unseal(payload *common.Payload, mapping *common.Mapping) (*common.Payload, bool) {
@@ -57,7 +59,8 @@ func (incoming *Incoming) stats(dropped bool, queue int, payload *common.Payload
 		aggStat.PrivateIP = mapping.PrivateIP.String()
 	}
 
-	incoming.aggregator.Aggs <- aggStat
+	var reply int
+	incoming.cli.Call("AggServer.Sink", aggStat, &reply)
 }
 
 func (incoming *Incoming) pipeline(buf []byte, queue int) bool {
@@ -88,6 +91,7 @@ func (incoming *Incoming) pipeline(buf []byte, queue int) bool {
 // Start handling packets.
 func (incoming *Incoming) Start(queue int) {
 	go func() {
+		incoming.log.Debug.Println("[INCOMING]", "Started main incoming thread.")
 		buf := make([]byte, common.MaxPacketLength)
 		for !incoming.stop {
 			incoming.pipeline(buf, queue)
@@ -101,13 +105,19 @@ func (incoming *Incoming) Stop() {
 }
 
 // NewIncoming generates a new Incoming worker which once started will handle packets coming from the remote nodes in the quantum network destined for the local node.
-func NewIncoming(cfg *common.Config, aggregator *agg.Agg, store datastore.Datastore, dev device.Device, sock socket.Socket) *Incoming {
+func NewIncoming(log *common.Logger, cfg *common.Config, dev device.Device, sock socket.Socket) *Incoming {
+	client, err := rpc.DialHTTP("unix", path.Join(cfg.DataDir, "quantum.sock"))
+	if err != nil {
+		log.Error.Println("error reaching master process via rpc: " + err.Error())
+		return nil
+	}
+
 	return &Incoming{
-		cfg:        cfg,
-		aggregator: aggregator,
-		dev:        dev,
-		sock:       sock,
-		store:      store,
-		stop:       false,
+		log:  log,
+		cfg:  cfg,
+		cli:  client,
+		dev:  dev,
+		sock: sock,
+		stop: false,
 	}
 }

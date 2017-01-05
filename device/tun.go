@@ -5,7 +5,7 @@ package device
 
 import (
 	"errors"
-	"net"
+	//"net"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -122,7 +122,7 @@ func initTun(name, src string, networkCfg *common.NetworkConfig) error {
 	if err != nil {
 		return errors.New("error setting the virutal network device MTU: " + err.Error())
 	}
-	addr, err := netlink.ParseAddr(src + "/32")
+	addr, err := netlink.ParseAddr(src + "/16")
 	if err != nil {
 		return errors.New("error parsing the virutal network device address: " + err.Error())
 	}
@@ -130,16 +130,16 @@ func initTun(name, src string, networkCfg *common.NetworkConfig) error {
 	if err != nil {
 		return errors.New("error setting the virutal network device address: " + err.Error())
 	}
-	route := &netlink.Route{
-		LinkIndex: link.Attrs().Index,
-		Scope:     netlink.SCOPE_LINK,
-		Protocol:  2,
-		Src:       net.ParseIP(src),
-		Dst:       networkCfg.IPNet,
-	}
-	err = netlink.RouteAdd(route)
-	if err != nil {
-		return errors.New("error setting the virutal network device network routes: " + err.Error())
-	}
+	//	route := &netlink.Route{
+	//		LinkIndex: link.Attrs().Index,
+	//		Scope:     netlink.SCOPE_LINK,
+	//		Protocol:  2,
+	//		Src:       net.ParseIP(src),
+	//		Dst:       networkCfg.IPNet,
+	//	}
+	//	err = netlink.RouteAdd(route)
+	//	if err != nil {
+	//		return errors.New("error setting the virutal network device route configuration: " + err.Error())
+	//	}
 	return nil
 }

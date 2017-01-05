@@ -6,40 +6,44 @@ package workers
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"net/rpc"
+	"path"
 
-	"github.com/Supernomad/quantum/agg"
 	"github.com/Supernomad/quantum/common"
-	"github.com/Supernomad/quantum/datastore"
 	"github.com/Supernomad/quantum/device"
 	"github.com/Supernomad/quantum/socket"
 )
 
 // Outgoing packet struct for handleing packets coming in off of a Device struct which are destined for a Socket struct.
 type Outgoing struct {
-	cfg        *common.Config
-	aggregator *agg.Agg
-	dev        device.Device
-	sock       socket.Socket
-	store      datastore.Datastore
-	stop       bool
+	log  *common.Logger
+	cfg  *common.Config
+	cli  *rpc.Client
+	dev  device.Device
+	sock socket.Socket
+	stop bool
 }
 
 func (outgoing *Outgoing) resolve(payload *common.Payload) (*common.Payload, *common.Mapping, bool) {
 	dip := binary.LittleEndian.Uint32(payload.Packet[16:20])
 
-	if mapping, ok := outgoing.store.Mapping(dip); ok {
-		if outgoing.cfg.IsIPv6Enabled && mapping.IPv6 != nil {
-			payload.Sockaddr = mapping.SockaddrInet6
-		} else if outgoing.cfg.IsIPv4Enabled && mapping.IPv4 != nil {
-			payload.Sockaddr = mapping.SockaddrInet4
-		} else {
-			return nil, nil, false
-		}
-		copy(payload.IPAddress, outgoing.cfg.PrivateIP.To4())
-		return payload, mapping, true
+	var mapping common.Mapping
+	err := outgoing.cli.Call("DatastoreServer.Mapping", dip, &mapping)
+	if err != nil {
+		return nil, nil, false
 	}
 
-	return nil, nil, false
+	outgoing.log.Debug.Println("[OUTGOING]", "Mapping retrieved: ", mapping)
+
+	if outgoing.cfg.IsIPv6Enabled && mapping.IPv6 != nil {
+		payload.Sockaddr = mapping.SockaddrInet6
+	} else if outgoing.cfg.IsIPv4Enabled && mapping.IPv4 != nil {
+		payload.Sockaddr = mapping.SockaddrInet4
+	} else {
+		return nil, nil, false
+	}
+	copy(payload.IPAddress, outgoing.cfg.PrivateIP.To4())
+	return payload, &mapping, true
 }
 
 func (outgoing *Outgoing) seal(payload *common.Payload, mapping *common.Mapping) (*common.Payload, bool) {
@@ -67,7 +71,8 @@ func (outgoing *Outgoing) stats(dropped bool, queue int, payload *common.Payload
 		aggStat.PrivateIP = mapping.PrivateIP.String()
 	}
 
-	outgoing.aggregator.Aggs <- aggStat
+	var reply int
+	outgoing.cli.Call("AggServer.Sink", aggStat, &reply)
 }
 
 func (outgoing *Outgoing) pipeline(buf []byte, queue int) bool {
@@ -98,6 +103,7 @@ func (outgoing *Outgoing) pipeline(buf []byte, queue int) bool {
 // Start handling packets.
 func (outgoing *Outgoing) Start(queue int) {
 	go func() {
+		outgoing.log.Debug.Println("[OUTGOING]", "Started main outgoing thread.")
 		buf := make([]byte, common.MaxPacketLength)
 		for !outgoing.stop {
 			outgoing.pipeline(buf, queue)
@@ -111,13 +117,19 @@ func (outgoing *Outgoing) Stop() {
 }
 
 // NewOutgoing generates an Outgoing worker which once started will handle packets coming from the local node destined for remote nodes in the quantum network.
-func NewOutgoing(cfg *common.Config, aggregator *agg.Agg, store datastore.Datastore, dev device.Device, sock socket.Socket) *Outgoing {
+func NewOutgoing(log *common.Logger, cfg *common.Config, dev device.Device, sock socket.Socket) *Outgoing {
+	client, err := rpc.DialHTTP("unix", path.Join(cfg.DataDir, "quantum.sock"))
+	if err != nil {
+		log.Error.Println("error reaching master process via rpc: " + err.Error())
+		return nil
+	}
+
 	return &Outgoing{
-		cfg:        cfg,
-		aggregator: aggregator,
-		dev:        dev,
-		sock:       sock,
-		store:      store,
-		stop:       false,
+		log:  log,
+		cfg:  cfg,
+		cli:  client,
+		dev:  dev,
+		sock: sock,
+		stop: false,
 	}
 }

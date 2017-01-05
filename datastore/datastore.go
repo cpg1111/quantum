@@ -29,13 +29,21 @@ type Datastore interface {
 	Init() error
 
 	// Mapping should return the mapping and true if it exists, if not the mapping should be nil and false should be returned along with it.
-	Mapping(ip uint32) (*common.Mapping, bool)
+	Mapping(ip uint32, mapping *common.Mapping) error
 
 	// Start should kick off any routines that need to run in the background to groom the mappings and manage the datastore state.
 	Start()
 
 	// Stop should fully shutdown all operation and ensure that all connections are terminated gracefully.
 	Stop()
+}
+
+type DatastoreServer struct {
+	Store Datastore
+}
+
+func (srv *DatastoreServer) Mapping(ip uint32, mapping *common.Mapping) error {
+	return srv.Store.Mapping(ip, mapping)
 }
 
 // New generates a datastore object based on the passed in Type and user configuration.

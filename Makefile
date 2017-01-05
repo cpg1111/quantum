@@ -25,6 +25,7 @@ build_docker:
 compile:
 	@echo "Compiling quantum..."
 	@go install github.com/Supernomad/quantum
+	@go install github.com/Supernomad/quantum/quantum-worker
 
 build_deps:
 	@echo "Running go get to install build dependancies..."

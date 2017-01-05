@@ -13,8 +13,9 @@ type Mock struct {
 }
 
 // Mapping always returns the internal mapping and true.
-func (mock *Mock) Mapping(ip uint32) (*common.Mapping, bool) {
-	return mock.InternalMapping, true
+func (mock *Mock) Mapping(ip uint32, mapping *common.Mapping) error {
+	mapping = mock.InternalMapping
+	return nil
 }
 
 // Init which is a noop.

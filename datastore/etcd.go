@@ -247,9 +247,22 @@ func (etcd *Etcd) watch() {
 }
 
 // Mapping returns a mapping and true based on the supplied uint32 representation of an ipv4 address if it exists within the datastore, otherwise it returns nil for the mapping and false.
-func (etcd *Etcd) Mapping(ip uint32) (*common.Mapping, bool) {
-	mapping, exists := etcd.mappings[ip]
-	return mapping, exists
+func (etcd *Etcd) Mapping(ip uint32, mapping *common.Mapping) error {
+	response, exists := etcd.mappings[ip]
+	if !exists {
+		return errors.New("mapping not found")
+	}
+
+	mapping.MachineID = response.MachineID
+	mapping.PrivateIP = response.PrivateIP
+	mapping.PublicKey = response.PublicKey
+	mapping.IPv4 = response.IPv4
+	mapping.IPv6 = response.IPv6
+	mapping.Port = response.Port
+	mapping.Cipher = response.Cipher
+	mapping.SockaddrInet6 = response.SockaddrInet6
+	mapping.SockaddrInet4 = response.SockaddrInet4
+	return nil
 }
 
 // Init the Etcd datastore which will open any necesary connections, preform an initial sync of the datastore, and define the local mapping in the datastore.

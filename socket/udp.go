@@ -61,7 +61,17 @@ func newUDP(cfg *common.Config) (*UDP, error) {
 			if err != nil {
 				return sock, errors.New("error creating the UDP socket: " + err.Error())
 			}
-			err = initUDP(queue, sock.cfg.ListenAddr)
+			var la syscall.Sockaddr
+			if sock.cfg.IsIPv6Enabled {
+				sa := &syscall.SockaddrInet6{Port: cfg.ListenPort}
+				copy(sa.Addr[:], cfg.ListenAddr.To16()[:])
+				la = sa
+			} else {
+				sa := &syscall.SockaddrInet4{Port: cfg.ListenPort}
+				copy(sa.Addr[:], cfg.ListenAddr.To4()[:])
+				la = sa
+			}
+			err = initUDP(queue, la)
 			if err != nil {
 				return sock, err
 			}
